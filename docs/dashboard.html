@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Himachal Pradesh School Dashboard (Primary & Mixed)</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <style>
+        body { margin:0; font-family:Arial; }
+        #map { height: 90vh; width: 100%; }
+        .legend {
+            background:white;
+            padding:10px;
+            border-radius:5px;
+            box-shadow:0 0 15px rgba(0,0,0,0.2);
+        }
+        .legend i {
+            width:18px; height:18px; float:left;
+            margin-right:8px; opacity:0.7;
+        }
+    </style>
+</head>
+<body>
+<div>
+    <label for="district-select">Select District:</label>
+    <select id="district-select">
+        <option value="all">All Districts</option>
+    </select>
+</div>
+<div id="map"></div>
+<script>
+    var map = L.map('map').setView([31.8, 77.2], 8);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    let districtLayer;
+    fetch('hp_districts.geojson')
+      .then(res => res.json())
+      .then(data => {
+        districtLayer = L.geoJSON(data, {
+          style: { color: 'black', weight: 1, fillOpacity: 0 },
+          onEachFeature: function(feature, layer) {
+            const name = feature.properties.district;
+            layer.bindTooltip(name);
+            const option = document.createElement('option');
+            option.value = name.toLowerCase().replace(/ /g, '_');
+            option.text = name;
+            document.getElementById('district-select').appendChild(option);
+          }
+        }).addTo(map);
+      });
+
+    let bufferLayer, schoolLayer;
+    document.getElementById('district-select').addEventListener('change', e => {
+        loadDistrict(e.target.value);
+    });
+
+    function loadDistrict(name) {
+        if (bufferLayer) map.removeLayer(bufferLayer);
+        if (schoolLayer) map.removeLayer(schoolLayer);
+
+        if (name === 'all') {
+            loadAllDistricts();
+        } else {
+            const buffersFile = `${name}_buffers.geojson`;
+            const schoolsFile = `${name}_schools.geojson`;
+            fetch(buffersFile).then(r => r.json()).then(addBufferLayer);
+            fetch(schoolsFile).then(r => r.json()).then(addSchoolLayer);
+        }
+    }
+
+    function loadAllDistricts() {
+        const dropdown = document.getElementById('district-select');
+        const names = [...dropdown.options].slice(1).map(o => o.value);
+        Promise.all(names.map(n => fetch(`${n}_buffers.geojson`).then(r => r.json())))
+          .then(allBufs => addBufferLayer({
+              type: "FeatureCollection",
+              features: [].concat(...allBufs.map(f => f.features))
+          }));
+        Promise.all(names.map(n => fetch(`${n}_schools.geojson`).then(r => r.json())))
+          .then(allSchs => addSchoolLayer({
+              type: "FeatureCollection",
+              features: [].concat(...allSchs.map(f => f.features))
+          }));
+    }
+
+    function addBufferLayer(data) {
+        bufferLayer = L.geoJSON(data, {
+            style: f => ({
+                fillColor: getBufferColor(f.properties.Student_Count),
+                color: getBufferColor(f.properties.Student_Count),
+                weight: 1, fillOpacity: 0.5
+            }),
+            onEachFeature: (feature, layer) => {
+                layer.bindPopup(`<b>${feature.properties.School_Name}</b><br>Students: ${feature.properties.Student_Count}`);
+            }
+        }).addTo(map);
+        if (data.features.length > 0) map.fitBounds(bufferLayer.getBounds());
+    }
+
+    function addSchoolLayer(data) {
+        schoolLayer = L.geoJSON(data, {
+            pointToLayer: (f, latlng) => L.circleMarker(latlng, {
+                radius: 6,
+                fillColor: f.properties.Marker_Color || '#666',
+                color: '#000',
+                weight: 1,
+                fillOpacity: 1
+            }),
+            onEachFeature: (feature, layer) => {
+                layer.bindPopup(`<b>${feature.properties.School_Name}</b><br>
+                                 Category: ${feature.properties.School_Category}<br>
+                                 Students: ${feature.properties.Student_Count}`);
+            }
+        }).addTo(map);
+    }
+
+    function getBufferColor(count) {
+        if (count === 0) return '#cccccc';
+        else if (count <= 10) return '#fee5d9';
+        else if (count <= 50) return '#fcae91';
+        else if (count <= 150) return '#fb6a4a';
+        else if (count <= 250) return '#ef3b2c';
+        else if (count <= 350) return '#cb181d';
+        else if (count <= 450) return '#a50f15';
+        else if (count <= 550) return '#4cae4c';
+        else if (count <= 750) return '#2b8c2b';
+        else if (count <= 900) return '#006d2c';
+        else return '#00441b';
+    }
+
+    // Load initial
+    loadDistrict('all');
+
+    // Add legend
+    const legend = L.control({position: 'bottomright'});
+    legend.onAdd = function(map) {
+        const div = L.DomUtil.create('div', 'legend');
+        div.innerHTML = `<b>Student Count</b><br>
+          <i style="background:#cccccc"></i> 0<br>
+          <i style="background:#fee5d9"></i> 1–10<br>
+          <i style="background:#fcae91"></i> 11–50<br>
+          <i style="background:#fb6a4a"></i> 51–150<br>
+          <i style="background:#ef3b2c"></i> 151–250<br>
+          <i style="background:#cb181d"></i> 251–350<br>
+          <i style="background:#a50f15"></i> 351–450<br>
+          <i style="background:#4cae4c"></i> 451–550<br>
+          <i style="background:#2b8c2b"></i> 551–750<br>
+          <i style="background:#006d2c"></i> 751–900<br>
+          <i style="background:#00441b"></i> 900+<br>
+          <br><b>School Marker</b><br>
+          <i style="background:blue"></i> Primary<br>
+          <i style="background:orange"></i> Pr. with Up.Pr. sec. and H.Sec.
+        `;
+        return div;
+    };
+    legend.addTo(map);
+</script>
+</body>
+</html>
